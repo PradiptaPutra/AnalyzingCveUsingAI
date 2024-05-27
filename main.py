@@ -1,5 +1,3 @@
-# File: main.py
-
 import mysql.connector
 import streamlit as st
 from langchain_core.prompts import ChatPromptTemplate
@@ -8,6 +6,7 @@ import os
 import requests
 import pandas as pd
 import logging
+import matplotlib.pyplot as plt
 
 # Configuration
 DATABASE_CONFIG = {
@@ -51,12 +50,12 @@ st.markdown("""
             color: #666;
         }
         .instructions {
-            background-color: #black;
+            background-color: #333;
             padding: 15px;
             border-radius: 5px;
             border: 1px solid #ddd;
             margin-bottom: 20px;
-            color:white
+            color: white;
         }
         .btn {
             margin-top: 15px;
@@ -194,7 +193,9 @@ def fetch_historical_cve_data(connection):
         cursor.execute("SELECT cve_id, description, cvss_score, cvss_vector FROM cve_table")
         historical_data = cursor.fetchall()
         cursor.close()
-        return historical_data
+        df = pd.DataFrame(historical_data)
+        df['cvss_score'] = pd.to_numeric(df['cvss_score'], errors='coerce')
+        return df
     except mysql.connector.Error as err:
         st.error(f"Error fetching historical CVE data from MySQL database: {err}")
         logging.error(f"Error fetching historical CVE data from MySQL database: {err}")
@@ -212,13 +213,10 @@ def main():
             </div>
         """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        cve_id = st.text_input("Enter the CVE ID:", placeholder="CVE-XXXX-XXXXX", key="cve_id_input")
-    
-    with col2:
-        user_role = st.selectbox("Select your user role:", USER_ROLES, key="user_role_select")
+    st.markdown("---")
+
+    cve_id = st.text_input("Enter CVE ID", placeholder="e.g., CVE-2021-34527")
+    user_role = st.selectbox("Select User Role", USER_ROLES, key="user_role_select")
 
     if cve_id and user_role:
         with st.spinner("Fetching CVE data..."):
@@ -272,6 +270,21 @@ def main():
                     impact_analysis = generate_impact_analysis(f"CVE-{cve_id}: {cve_description}", infrastructure_details)
                     st.subheader("Impact Analysis")
                     st.write(impact_analysis)
+
+                historical_data = fetch_historical_cve_data(connection)
+                if historical_data is not None:
+                    st.subheader("Historical CVE Data")
+                    st.dataframe(historical_data)
+
+                    if 'cvss_score' in historical_data.columns and not historical_data['cvss_score'].isnull().all():
+                        fig, ax = plt.subplots()
+                        historical_data['cvss_score'].plot(kind='hist', bins=10, ax=ax, color='skyblue', edgecolor='black')
+                        ax.set_title("Distribution of CVSS Scores")
+                        ax.set_xlabel("CVSS Score")
+                        ax.set_ylabel("Frequency")
+                        st.pyplot(fig)
+                    else:
+                        st.warning("No numeric CVSS Score data available in historical data.")
 
             except KeyError as e:
                 st.error(f"Error extracting CVE data: {e}")
