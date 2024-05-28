@@ -13,8 +13,12 @@ import asyncio
 import streamlit as st
 from collections import defaultdict
 import threading
-from queue import Queue
 import time
+import nltk
+from nltk.tokenize import sent_tokenize
+from queue import Queue  # Import the Queue class
+
+
 
 # Configuration
 DATABASE_CONFIG = {
@@ -209,46 +213,69 @@ def fetch_historical_cve_data(connection):
         logging.error(f"Error fetching historical CVE data from MySQL database: {err}")
         return None
         
-# Function to extract and chunk text from PDF
-@st.cache(allow_output_mutation=True)
-def extract_and_chunk_text_from_pdf(pdf_path):
+# Function to extract and tokenize text from PDF
+@st.cache_data
+def extract_and_tokenize_text_from_pdf(pdf_path):
     doc = fitz.open(pdf_path)
-    chunks = []
+    text = ""
     for page in doc:
-        text = page.get_text("text")
-        # Splitting the text into chunks of about 500 words
-        words = text.split()
-        for i in range(0, len(words), 500):
-            chunks.append(' '.join(words[i:i+500]))
-    return chunks
+        text += page.get_text("text")
+    sentences = sent_tokenize(text)
+    return sentences
 
-# Question-Answering Model Setup
-qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2")
+# Initialize the ChatGroq model
+chat = ChatGroq(temperature=0, model_name="llama3-8b-8192")
 
-def threaded_qa(question, context, output):
-    answer = qa_pipeline({'question': question, 'context': context})
-    output.put(answer['answer'])
+def answer_question(question, sentences):
+    if not sentences:
+        return "I don't have that information."
 
-def chatbot_interface(chunks):
+    # Normalize question for better comparison
+    question_words = set(word.lower() for word in question.split())
+
+    # Filter sentences that contain any of the significant words from the question
+    relevant_sentences = [sentence for sentence in sentences if set(word.lower() for word in sentence.split()) & question_words]
+
+    # If no sentences are found relevant, return a message indicating no information
+    if not relevant_sentences:
+        return "I don't have that information."
+
+    # Use the most relevant sentence to generate a response
+    best_sentence = max(relevant_sentences, key=lambda s: sum(word in s.lower() for word in question.lower().split()))
+
+    prompt = f"Question: {question}\nContext: {best_sentence}\nPlease elaborate on the information provided in a detailed and human-friendly manner."
+
+    # Create a prompt template from the message
+    prompt_template = ChatPromptTemplate.from_messages([("human", prompt)])
+    
+    # Create a chain with the chat model
+    chain = prompt_template | chat
+    
+    # Generate the output using the streaming method
+    output = ""
+    try:
+        for chunk in chain.stream({"question": question, "context": best_sentence}):
+            output += chunk.content
+        return output.strip() if output else "I don't have that information."
+    except Exception as e:
+        return f"Error in generating response: {e}"
+
+# Example usage in your interface, assuming integration in a larger application like Streamlit
+def chatbot_interface(sentences):
     st.subheader("PDF Knowledge Chatbot")
     user_query = st.text_input("Ask me anything about the document:")
     if st.button("Ask") and user_query:
-        with st.spinner('Searching for answers...'):
-            # Prepare a queue to collect the answer
-            output = Queue()
-            # Start a separate thread to run QA without blocking Streamlit
-            threading.Thread(target=threaded_qa, args=(user_query, " ".join(chunks), output)).start()
-            # Wait for the answer to be processed
-            while output.empty():
-                time.sleep(0.1)
-            answer = output.get()
-            st.write("Answer:", answer)
+        answer = answer_question(user_query, sentences)
+        st.write("Answer:", answer)
+
+
+
 
 # Streamlit app
 def main():
     st.markdown("<h1 class='title'>CVE Analyzing Using AI</h1>", unsafe_allow_html=True)
-    chunks = extract_and_chunk_text_from_pdf('Generative AI and Large Language Models for Cyber Security.pdf')
-    chatbot_interface(chunks)
+    sentences = extract_and_tokenize_text_from_pdf('Generative AI and Large Language Models for Cyber Security.pdf')
+    chatbot_interface(sentences)
 
     with st.expander("Instructions", expanded=True):
         st.markdown("""
