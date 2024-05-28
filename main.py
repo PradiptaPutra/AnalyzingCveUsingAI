@@ -7,6 +7,10 @@ import requests
 import pandas as pd
 import logging
 import matplotlib.pyplot as plt
+import fitz  
+from transformers import pipeline
+import asyncio
+import streamlit as st
 
 # Configuration
 DATABASE_CONFIG = {
@@ -183,14 +187,14 @@ def generate_impact_analysis(cve_details, infrastructure_details):
         output += chunk.content
     return output
 
-# Fetch historical CVE data from the database
+# Fetch historical CVE data from the database and sort it by CVSS score
 def fetch_historical_cve_data(connection):
     if connection is None or not connection.is_connected():
         st.error("No database connection.")
         return None
     try:
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT cve_id, description, cvss_score, cvss_vector FROM cve_table")
+        cursor.execute("SELECT cve_id, description, cvss_score, cvss_vector FROM cve_table ORDER BY cvss_score DESC")
         historical_data = cursor.fetchall()
         cursor.close()
         df = pd.DataFrame(historical_data)
@@ -200,10 +204,35 @@ def fetch_historical_cve_data(connection):
         st.error(f"Error fetching historical CVE data from MySQL database: {err}")
         logging.error(f"Error fetching historical CVE data from MySQL database: {err}")
         return None
+        
+# Function to extract text from PDF
+def extract_text_from_pdf(pdf_path):
+    doc = fitz.open(pdf_path)
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
+pdf_text = extract_text_from_pdf('test.pdf')
+
+# Set up a transformer model for question-answering
+qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2")
+def search_pdf_content(question, context):
+    result = qa_pipeline(question=question, context=context)
+    return result['answer']
+
+# Streamlit interface for the chatbot
+def chatbot_interface():
+    st.subheader("PDF Knowledge Chatbot")
+    user_query = st.text_input("Ask me anything about the document:")
+    if st.button("Ask") and user_query:
+        answer = search_pdf_content(user_query, pdf_text)
+        st.write("Answer:", answer)
 
 # Streamlit app
 def main():
     st.markdown("<h1 class='title'>CVE Analyzing Using AI</h1>", unsafe_allow_html=True)
+
+    chatbot_interface()  # Display chatbot interface upfront
 
     with st.expander("Instructions", expanded=True):
         st.markdown("""
@@ -273,18 +302,17 @@ def main():
 
                 historical_data = fetch_historical_cve_data(connection)
                 if historical_data is not None:
-                    st.subheader("Historical CVE Data")
-                    st.dataframe(historical_data)
+                    # Apply conditional formatting to the DataFrame
+                    def colorize(val):
+                        color = 'maroon' if val >= 9 else 'coral' if val >= 7 else 'greenyellow'
+                        return f'background-color: {color}'
 
-                    if 'cvss_score' in historical_data.columns and not historical_data['cvss_score'].isnull().all():
-                        fig, ax = plt.subplots()
-                        historical_data['cvss_score'].plot(kind='hist', bins=10, ax=ax, color='skyblue', edgecolor='black')
-                        ax.set_title("Distribution of CVSS Scores")
-                        ax.set_xlabel("CVSS Score")
-                        ax.set_ylabel("Frequency")
-                        st.pyplot(fig)
-                    else:
-                        st.warning("No numeric CVSS Score data available in historical data.")
+                    st.dataframe(historical_data.style.applymap(colorize, subset=['cvss_score']))
+                else:
+                    st.write("No data available.")
+                    st.subheader("Historical CVE Data")
+                    
+                    st.dataframe(historical_data)
 
             except KeyError as e:
                 st.error(f"Error extracting CVE data: {e}")
