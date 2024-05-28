@@ -11,6 +11,10 @@ import fitz
 from transformers import pipeline
 import asyncio
 import streamlit as st
+from collections import defaultdict
+import threading
+from queue import Queue
+import time
 
 # Configuration
 DATABASE_CONFIG = {
@@ -205,34 +209,46 @@ def fetch_historical_cve_data(connection):
         logging.error(f"Error fetching historical CVE data from MySQL database: {err}")
         return None
         
-# Function to extract text from PDF
-def extract_text_from_pdf(pdf_path):
+# Function to extract and chunk text from PDF
+@st.cache(allow_output_mutation=True)
+def extract_and_chunk_text_from_pdf(pdf_path):
     doc = fitz.open(pdf_path)
-    text = ""
+    chunks = []
     for page in doc:
-        text += page.get_text()
-    return text
-pdf_text = extract_text_from_pdf('test.pdf')
+        text = page.get_text("text")
+        # Splitting the text into chunks of about 500 words
+        words = text.split()
+        for i in range(0, len(words), 500):
+            chunks.append(' '.join(words[i:i+500]))
+    return chunks
 
-# Set up a transformer model for question-answering
+# Question-Answering Model Setup
 qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2")
-def search_pdf_content(question, context):
-    result = qa_pipeline(question=question, context=context)
-    return result['answer']
 
-# Streamlit interface for the chatbot
-def chatbot_interface():
+def threaded_qa(question, context, output):
+    answer = qa_pipeline({'question': question, 'context': context})
+    output.put(answer['answer'])
+
+def chatbot_interface(chunks):
     st.subheader("PDF Knowledge Chatbot")
     user_query = st.text_input("Ask me anything about the document:")
     if st.button("Ask") and user_query:
-        answer = search_pdf_content(user_query, pdf_text)
-        st.write("Answer:", answer)
+        with st.spinner('Searching for answers...'):
+            # Prepare a queue to collect the answer
+            output = Queue()
+            # Start a separate thread to run QA without blocking Streamlit
+            threading.Thread(target=threaded_qa, args=(user_query, " ".join(chunks), output)).start()
+            # Wait for the answer to be processed
+            while output.empty():
+                time.sleep(0.1)
+            answer = output.get()
+            st.write("Answer:", answer)
 
 # Streamlit app
 def main():
     st.markdown("<h1 class='title'>CVE Analyzing Using AI</h1>", unsafe_allow_html=True)
-
-    chatbot_interface()  # Display chatbot interface upfront
+    chunks = extract_and_chunk_text_from_pdf('Generative AI and Large Language Models for Cyber Security.pdf')
+    chatbot_interface(chunks)
 
     with st.expander("Instructions", expanded=True):
         st.markdown("""
