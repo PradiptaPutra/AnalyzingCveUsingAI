@@ -1,0 +1,9 @@
+mysql-connector-python==8.0.29
+streamlit==1.10.0
+requests==2.27.1
+pandas==1.4.2
+PyMuPDF==1.19.6  # This corresponds to the 'fitz' library
+nltk==3.7
+
+# LangChain libraries might not be available on PyPI. You would need to install them from their respective source if they are private or in development.
+# You might find instructions on the official LangChain GitHub repository or contact the maintainers for more details on installation.

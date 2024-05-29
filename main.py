@@ -6,21 +6,11 @@ import os
 import requests
 import pandas as pd
 import logging
-import matplotlib.pyplot as plt
 import fitz  
-from transformers import pipeline
-import asyncio
 import streamlit as st
-from collections import defaultdict
-import threading
-import time
-import nltk
 from nltk.tokenize import sent_tokenize
-from queue import Queue  # Import the Queue class
 
 
-
-# Configuration
 DATABASE_CONFIG = {
     'host': "localhost",
     'user': "root",
@@ -269,14 +259,9 @@ def chatbot_interface(sentences):
         st.write("Answer:", answer)
 
 
-
-
 # Streamlit app
 def main():
     st.markdown("<h1 class='title'>CVE Analyzing Using AI</h1>", unsafe_allow_html=True)
-    sentences = extract_and_tokenize_text_from_pdf('Generative AI and Large Language Models for Cyber Security.pdf')
-    chatbot_interface(sentences)
-
     with st.expander("Instructions", expanded=True):
         st.markdown("""
             <div class="instructions">
@@ -365,7 +350,8 @@ def main():
                 logging.error(f"Error connecting to MySQL database: {err}")
         else:
             st.warning("Failed to fetch CVE data. Please check the CVE ID and try again.")
-
+        sentences = extract_and_tokenize_text_from_pdf('Generative AI and Large Language Models for Cyber Security.pdf')
+        chatbot_interface(sentences)
     st.markdown("---")
     st.write("<div class='footer'>This application was developed using Streamlit and Groq.<br>For more information or support, please contact <a href='mailto:your_email@example.com'>your_email@example.com</a>.</div>", unsafe_allow_html=True)
 
